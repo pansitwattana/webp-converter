@@ -1,345 +1,435 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Upload, FileImage, ArrowRight, Download, Trash2, Settings, AlertCircle, CheckCircle, Image as ImageIcon, X,
-Archive } from 'lucide-react';
+<!DOCTYPE html>
+<html lang="en">
 
-const App = () => {
-const [files, setFiles] = useState([]);
-const [quality, setQuality] = useState(0.8);
-const [isDragging, setIsDragging] = useState(false);
-const [isProcessing, setIsProcessing] = useState(false);
-const [isZipping, setIsZipping] = useState(false);
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebP Converter</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- JSZip -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+</head>
 
-// Load JSZip dynamically
-useEffect(() => {
-if (!window.JSZip) {
-const script = document.createElement('script');
-script.src = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
-script.async = true;
-document.body.appendChild(script);
-return () => {
-if (document.body.contains(script)) {
-document.body.removeChild(script);
-}
-};
-}
-}, []);
+<body class="min-h-screen bg-slate-50 text-slate-800 font-sans p-4 md:p-8">
+  <div class="max-w-5xl mx-auto space-y-6">
 
-// Constants
-const MAX_FILES = 50;
-
-const onDragOver = (e) => {
-e.preventDefault();
-setIsDragging(true);
-};
-
-const onDragLeave = (e) => {
-e.preventDefault();
-setIsDragging(false);
-};
-
-const onDrop = (e) => {
-e.preventDefault();
-setIsDragging(false);
-const droppedFiles = Array.from(e.dataTransfer.files);
-handleFiles(droppedFiles);
-};
-
-const handleFileInput = (e) => {
-const selectedFiles = Array.from(e.target.files);
-handleFiles(selectedFiles);
-};
-
-const handleFiles = (newFiles) => {
-const validFiles = newFiles.filter(file =>
-file.type === 'image/png' || file.type === 'image/jpeg' || file.type === 'image/jpg'
-);
-
-if (validFiles.length === 0) return;
-
-const newFileObjects = validFiles.map(file => ({
-id: Math.random().toString(36).substr(2, 9),
-file,
-preview: URL.createObjectURL(file),
-convertedUrl: null,
-status: 'pending', // pending, converting, done, error
-convertedSize: 0,
-originalSize: file.size
-}));
-
-setFiles(prev => [...prev, ...newFileObjects].slice(0, MAX_FILES));
-};
-
-const convertImage = async (fileObj) => {
-return new Promise((resolve, reject) => {
-const img = new Image();
-img.onload = () => {
-const canvas = document.createElement('canvas');
-canvas.width = img.width;
-canvas.height = img.height;
-const ctx = canvas.getContext('2d');
-ctx.drawImage(img, 0, 0);
-
-// Convert to WebP
-const dataUrl = canvas.toDataURL('image/webp', quality);
-
-// Calculate size savings
-const head = 'data:image/webp;base64,';
-const size = Math.round((dataUrl.length - head.length) * 3 / 4);
-
-resolve({ url: dataUrl, size });
-};
-img.onerror = reject;
-img.src = fileObj.preview;
-});
-};
-
-const downloadAllZip = async () => {
-const convertedFiles = files.filter(f => f.status === 'done');
-if (convertedFiles.length === 0) return;
-
-if (!window.JSZip) {
-console.error("JSZip not loaded yet");
-return;
-}
-
-setIsZipping(true);
-try {
-const zip = new window.JSZip();
-const usedNames = new Set();
-
-convertedFiles.forEach(file => {
-if (!file.convertedUrl) return;
-
-// Handle duplicate filenames
-let baseName = file.file.name.substring(0, file.file.name.lastIndexOf('.')) || file.file.name;
-let fileName = `${baseName}.webp`;
-let counter = 1;
-
-while (usedNames.has(fileName)) {
-fileName = `${baseName} (${counter}).webp`;
-counter++;
-}
-usedNames.add(fileName);
-
-// Get base64 data (remove header)
-const data = file.convertedUrl.split(',')[1];
-zip.file(fileName, data, { base64: true });
-});
-
-const blob = await zip.generateAsync({ type: 'blob' });
-
-// Trigger download without extra dependencies
-const url = URL.createObjectURL(blob);
-const a = document.createElement('a');
-a.href = url;
-a.download = 'converted_images_geneus.zip';
-document.body.appendChild(a);
-a.click();
-document.body.removeChild(a);
-URL.revokeObjectURL(url);
-
-} catch (error) {
-console.error("Failed to zip", error);
-} finally {
-setIsZipping(false);
-}
-};
-
-const processAll = async () => {
-setIsProcessing(true);
-
-const processedFiles = await Promise.all(files.map(async (fileObj) => {
-if (fileObj.status === 'done') return fileObj;
-
-try {
-const result = await convertImage(fileObj);
-return {
-...fileObj,
-convertedUrl: result.url,
-convertedSize: result.size,
-status: 'done'
-};
-} catch (err) {
-return { ...fileObj, status: 'error' };
-}
-}));
-
-setFiles(processedFiles);
-setIsProcessing(false);
-};
-
-const removeFile = (id) => {
-setFiles(prev => {
-const newFiles = prev.filter(f => f.id !== id);
-// Cleanup object URLs to prevent memory leaks
-const fileToRemove = prev.find(f => f.id === id);
-if (fileToRemove) {
-URL.revokeObjectURL(fileToRemove.preview);
-}
-return newFiles;
-});
-};
-
-const clearAll = () => {
-files.forEach(f => URL.revokeObjectURL(f.preview));
-setFiles([]);
-};
-
-const formatBytes = (bytes, decimals = 2) => {
-if (bytes === 0) return '0 Bytes';
-const k = 1024;
-const dm = decimals < 0 ? 0 : decimals; const sizes=['Bytes', 'KB' , 'MB' , 'GB' ]; const i=Math.floor(Math.log(bytes) /
-  Math.log(k)); return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i]; }; // Effect to auto-convert
-  when added (optional, currently manual to allow quality setting) // Keeping it manual allows user to check settings
-  first. return ( <div className="min-h-screen bg-slate-50 text-slate-800 font-sans p-4 md:p-8">
-  <div className="max-w-5xl mx-auto space-y-6">
-
-    {/* Header */}
+    <!-- Header -->
     <div
-      className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+      class="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
       <div>
-        <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-          <ImageIcon className="w-8 h-8 text-blue-600" />
+        <h1 class="text-2xl font-bold text-slate-900 flex items-center gap-2">
+          <i data-lucide="image" class="w-8 h-8 text-blue-600"></i>
           WebP Converter
         </h1>
-        <p className="text-slate-500 text-sm mt-1">Secure client-side conversion for PNG & JPEG</p>
+        <p class="text-slate-500 text-sm mt-1">Secure client-side conversion for PNG & JPEG</p>
       </div>
-      <div className="flex items-center gap-4 bg-slate-50 p-3 rounded-xl border border-slate-200">
-        <Settings className="w-4 h-4 text-slate-400" />
-        <div className="flex flex-col">
-          <label className="text-xs font-medium text-slate-600 mb-1">Quality: {Math.round(quality * 100)}%</label>
-          <input type="range" min="0.1" max="1" step="0.05" value={quality} onChange={(e)=>
-          setQuality(parseFloat(e.target.value))}
-          className="w-32 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
-          />
+      <div class="flex items-center gap-4 bg-slate-50 p-3 rounded-xl border border-slate-200">
+        <i data-lucide="settings" class="w-4 h-4 text-slate-400"></i>
+        <div class="flex flex-col">
+          <label class="text-xs font-medium text-slate-600 mb-1">Quality: <span id="quality-value">80%</span></label>
+          <input type="range" id="quality-slider" min="0.1" max="1" step="0.05" value="0.8"
+            class="w-32 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600">
         </div>
       </div>
     </div>
 
-    {/* Dropzone */}
-    <div onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop} className={` relative group cursor-pointer
-      transition-all duration-200 ease-in-out border-2 border-dashed rounded-2xl p-12 text-center ${isDragging
-      ? 'border-blue-500 bg-blue-50/50' : 'border-slate-300 hover:border-slate-400 bg-white' } `}>
-      <input type="file" multiple accept="image/png, image/jpeg, image/jpg" onChange={handleFileInput}
-        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
-      <div className="flex flex-col items-center gap-4 pointer-events-none">
-        <div className={`p-4 rounded-full ${isDragging ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-400'
-          }`}>
-          <Upload className="w-8 h-8" />
+    <!-- Dropzone -->
+    <div id="dropzone"
+      class="relative group cursor-pointer transition-all duration-200 ease-in-out border-2 border-dashed border-slate-300 hover:border-slate-400 bg-white rounded-2xl p-12 text-center">
+      <input type="file" id="file-input" multiple accept="image/png, image/jpeg, image/jpg"
+        class="absolute inset-0 w-full h-full opacity-0 cursor-pointer">
+      <div class="flex flex-col items-center gap-4 pointer-events-none">
+        <div id="dropzone-icon-bg" class="p-4 rounded-full bg-slate-100 text-slate-400">
+          <i data-lucide="upload" class="w-8 h-8"></i>
         </div>
-        <div className="space-y-1">
-          <p className="text-lg font-medium text-slate-700">
-            {isDragging ? 'Drop images here' : 'Click or drag images here'}
+        <div class="space-y-1">
+          <p id="dropzone-text" class="text-lg font-medium text-slate-700">
+            Click or drag images here
           </p>
-          <p className="text-sm text-slate-400">Supports PNG and JPEG (Max 50 files)</p>
+          <p class="text-sm text-slate-400">Supports PNG and JPEG (Max 50 files)</p>
         </div>
       </div>
     </div>
 
-    {/* Actions Bar */}
-    {files.length > 0 && (
-    <div
-      className="flex items-center justify-between bg-white p-4 rounded-xl border border-slate-200 shadow-sm sticky top-4 z-10">
-      <div className="text-sm text-slate-600 font-medium">
-        {files.length} file{files.length !== 1 && 's'} loaded
+    <!-- Actions Bar -->
+    <div id="actions-bar"
+      class="hidden flex items-center justify-between bg-white p-4 rounded-xl border border-slate-200 shadow-sm sticky top-4 z-10">
+      <div class="text-sm text-slate-600 font-medium">
+        <span id="file-count">0</span> files loaded
       </div>
-      <div className="flex items-center gap-3">
-        <button onClick={clearAll}
-          className="px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+      <div class="flex items-center gap-3">
+        <button id="clear-btn"
+          class="px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 rounded-lg transition-colors">
           Clear All
         </button>
 
-        {files.some(f => f.status === 'done') && (
-        <button onClick={downloadAllZip} disabled={isZipping}
-          className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg shadow-sm transition-colors">
-          {isZipping ? <span className="animate-spin">⟳</span> :
-          <Archive className="w-4 h-4" />}
-          <span className="hidden sm:inline">Download Zip</span>
+        <button id="download-zip-btn"
+          class="hidden flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg shadow-sm transition-colors">
+          <i data-lucide="archive" class="w-4 h-4"></i>
+          <span class="hidden sm:inline">Download Zip</span>
         </button>
-        )}
 
-        <button onClick={processAll} disabled={isProcessing} className={` flex items-center gap-2 px-6 py-2 text-sm
-          font-medium text-white rounded-lg shadow-sm transition-all transform active:scale-95 ${isProcessing
-          ? 'bg-slate-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700' } `}>
-          {isProcessing ? (
-          <>
-            <span className="animate-spin">⟳</span> Processing...
-          </>
-          ) : (
-          <>
-            Convert All
-            <ArrowRight className="w-4 h-4" />
-          </>
-          )}
+        <button id="process-btn"
+          class="flex items-center gap-2 px-6 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm transition-all transform active:scale-95">
+          Convert All <i data-lucide="arrow-right" class="w-4 h-4"></i>
         </button>
       </div>
     </div>
-    )}
 
-    {/* File List */}
-    <div className="space-y-3">
-      {files.map((fileObj) => (
-      <div key={fileObj.id}
-        className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center gap-4 transition-all hover:border-blue-200">
-        {/* Preview */}
-        <div className="relative w-20 h-20 bg-slate-100 rounded-lg overflow-hidden shrink-0 border border-slate-200">
-          <img src={fileObj.preview} alt="Preview" className="w-full h-full object-cover" />
-        </div>
+    <!-- File List -->
+    <div id="file-list" class="space-y-3">
+      <!-- Files will be injected here -->
+    </div>
 
-        {/* Info */}
-        <div className="flex-1 min-w-0">
-          <h3 className="font-medium text-slate-800 truncate">{fileObj.file.name}</h3>
-          <div className="flex items-center gap-4 mt-1 text-sm">
-            <span className="text-slate-500">{formatBytes(fileObj.originalSize)}</span>
-            <ArrowRight className="w-3 h-3 text-slate-300" />
-            <span className={`font-medium ${fileObj.convertedSize < fileObj.originalSize ? 'text-green-600'
-              : 'text-slate-600' }`}>
-              {fileObj.convertedSize > 0 ? formatBytes(fileObj.convertedSize) : '---'}
-            </span>
-            {fileObj.convertedSize > 0 && (
-            <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
-              -{Math.round((1 - fileObj.convertedSize / fileObj.originalSize) * 100)}%
-            </span>
-            )}
-          </div>
-        </div>
-
-        {/* Status & Actions */}
-        <div className="flex items-center gap-3 justify-end shrink-0">
-          {fileObj.status === 'pending' && (
-          <span className="text-xs font-medium text-slate-400 bg-slate-100 px-3 py-1 rounded-full">Pending</span>
-          )}
-
-          {fileObj.status === 'done' && (
-          <a href={fileObj.convertedUrl} download={`${fileObj.file.name.split('.')[0]}.webp`}
-            className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 transition-colors">
-            <Download className="w-4 h-4" />
-            <span className="hidden sm:inline">Download</span>
-          </a>
-          )}
-
-          <button onClick={()=> removeFile(fileObj.id)}
-            className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-            >
-            <Trash2 className="w-4 h-4" />
-          </button>
-        </div>
+    <!-- Empty State (initially hidden if files present, but logic handles it) -->
+    <div id="empty-state" class="text-center py-12 hidden">
+      <div class="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
+        <i data-lucide="file-image" class="w-8 h-8 text-slate-300"></i>
       </div>
-      ))}
-
-      {files.length === 0 && !isDragging && (
-      <div className="text-center py-12">
-        <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
-          <FileImage className="w-8 h-8 text-slate-300" />
-        </div>
-        <p className="text-slate-400">No files selected yet</p>
-      </div>
-      )}
+      <p class="text-slate-400">No files selected yet</p>
     </div>
 
   </div>
-  </div>
-  );
-  };
 
-  export default App;
+  <script>
+    // --- State ---
+    let files = [];
+    let quality = 0.8;
+    const MAX_FILES = 50;
+    let isProcessing = false;
+    let isZipping = false;
+
+    // --- DOM Elements ---
+    const dropzone = document.getElementById('dropzone');
+    const fileInput = document.getElementById('file-input');
+    const qualitySlider = document.getElementById('quality-slider');
+    const qualityValue = document.getElementById('quality-value');
+    const fileList = document.getElementById('file-list');
+    const actionsBar = document.getElementById('actions-bar');
+    const fileCount = document.getElementById('file-count');
+    const clearBtn = document.getElementById('clear-btn');
+    const processBtn = document.getElementById('process-btn');
+    const downloadZipBtn = document.getElementById('download-zip-btn');
+    const emptyState = document.getElementById('empty-state');
+    const dropzoneIconBg = document.getElementById('dropzone-icon-bg');
+    const dropzoneText = document.getElementById('dropzone-text');
+
+    // --- Initialization ---
+    lucide.createIcons();
+
+    // --- Event Listeners ---
+
+    // Drag & Drop
+    dropzone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropzone.classList.add('border-blue-500', 'bg-blue-50/50');
+      dropzone.classList.remove('border-slate-300', 'bg-white');
+      dropzoneIconBg.classList.add('bg-blue-100', 'text-blue-600');
+      dropzoneIconBg.classList.remove('bg-slate-100', 'text-slate-400');
+      dropzoneText.textContent = 'Drop images here';
+    });
+
+    dropzone.addEventListener('dragleave', (e) => {
+      e.preventDefault();
+      resetDropzoneStyles();
+    });
+
+    dropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      resetDropzoneStyles();
+      handleFiles(Array.from(e.dataTransfer.files));
+    });
+
+    function resetDropzoneStyles() {
+      dropzone.classList.remove('border-blue-500', 'bg-blue-50/50');
+      dropzone.classList.add('border-slate-300', 'bg-white');
+      dropzoneIconBg.classList.remove('bg-blue-100', 'text-blue-600');
+      dropzoneIconBg.classList.add('bg-slate-100', 'text-slate-400');
+      dropzoneText.textContent = 'Click or drag images here';
+    }
+
+    // File Input
+    fileInput.addEventListener('change', (e) => {
+      handleFiles(Array.from(e.target.files));
+      fileInput.value = ''; // Reset to allow selecting same files again
+    });
+
+    // Quality Slider
+    qualitySlider.addEventListener('input', (e) => {
+      quality = parseFloat(e.target.value);
+      qualityValue.textContent = Math.round(quality * 100) + '%';
+    });
+
+    // Actions
+    clearBtn.addEventListener('click', clearAll);
+    processBtn.addEventListener('click', processAll);
+    downloadZipBtn.addEventListener('click', downloadAllZip);
+
+    // --- Core Logic ---
+
+    function handleFiles(newFiles) {
+      const validFiles = newFiles.filter(file =>
+        file.type === 'image/png' || file.type === 'image/jpeg' || file.type === 'image/jpg'
+      );
+
+      if (validFiles.length === 0) return;
+
+      const newFileObjects = validFiles.map(file => ({
+        id: Math.random().toString(36).substr(2, 9),
+        file,
+        preview: URL.createObjectURL(file),
+        convertedUrl: null,
+        status: 'pending', // pending, converting, done, error
+        convertedSize: 0,
+        originalSize: file.size
+      }));
+
+      files = [...files, ...newFileObjects].slice(0, MAX_FILES);
+      renderFiles();
+    }
+
+    function renderFiles() {
+      fileList.innerHTML = '';
+
+      if (files.length === 0) {
+        actionsBar.classList.add('hidden');
+        emptyState.classList.remove('hidden');
+        return;
+      }
+
+      actionsBar.classList.remove('hidden');
+      emptyState.classList.add('hidden');
+      fileCount.textContent = files.length;
+
+      // Check if any files are done to show/hide Zip button
+      const anyDone = files.some(f => f.status === 'done');
+      if (anyDone) {
+        downloadZipBtn.classList.remove('hidden');
+      } else {
+        downloadZipBtn.classList.add('hidden');
+      }
+
+      files.forEach(fileObj => {
+        const el = document.createElement('div');
+        el.className = 'bg-white rounded-xl p-4 border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center gap-4 transition-all hover:border-blue-200';
+
+        // Calculate savings
+        let sizeInfo = '';
+        if (fileObj.convertedSize > 0) {
+          const savings = Math.round((1 - fileObj.convertedSize / fileObj.originalSize) * 100);
+          sizeInfo = `
+                        <span class="font-medium ${fileObj.convertedSize < fileObj.originalSize ? 'text-green-600' : 'text-slate-600'}">
+                            ${formatBytes(fileObj.convertedSize)}
+                        </span>
+                        <span class="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
+                            -${savings}%
+                        </span>
+                    `;
+        } else {
+          sizeInfo = `<span class="font-medium text-slate-600">---</span>`;
+        }
+
+        // Status/Action button
+        let actionHtml = '';
+        if (fileObj.status === 'pending') {
+          actionHtml = `<span class="text-xs font-medium text-slate-400 bg-slate-100 px-3 py-1 rounded-full">Pending</span>`;
+        } else if (fileObj.status === 'done') {
+          const downloadName = `${fileObj.file.name.substring(0, fileObj.file.name.lastIndexOf('.')) || fileObj.file.name}.webp`;
+          actionHtml = `
+                        <a href="${fileObj.convertedUrl}" download="${downloadName}" class="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 transition-colors">
+                            <i data-lucide="download" class="w-4 h-4"></i>
+                            <span class="hidden sm:inline">Download</span>
+                        </a>
+                    `;
+        } else if (fileObj.status === 'error') {
+          actionHtml = `<span class="text-xs font-medium text-red-500 bg-red-50 px-3 py-1 rounded-full">Error</span>`;
+        } else if (fileObj.status === 'converting') {
+          actionHtml = `<span class="text-xs font-medium text-blue-500 bg-blue-50 px-3 py-1 rounded-full animate-pulse">Converting...</span>`;
+        }
+
+        el.innerHTML = `
+                    <!-- Preview -->
+                    <div class="relative w-20 h-20 bg-slate-100 rounded-lg overflow-hidden shrink-0 border border-slate-200">
+                        <img src="${fileObj.preview}" alt="Preview" class="w-full h-full object-cover">
+                    </div>
+
+                    <!-- Info -->
+                    <div class="flex-1 min-w-0">
+                        <h3 class="font-medium text-slate-800 truncate">${fileObj.file.name}</h3>
+                        <div class="flex items-center gap-4 mt-1 text-sm">
+                            <span class="text-slate-500">${formatBytes(fileObj.originalSize)}</span>
+                            <i data-lucide="arrow-right" class="w-3 h-3 text-slate-300"></i>
+                            ${sizeInfo}
+                        </div>
+                    </div>
+
+                    <!-- Status & Actions -->
+                    <div class="flex items-center gap-3 justify-end shrink-0">
+                        ${actionHtml}
+                        <button onclick="removeFile('${fileObj.id}')" class="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                            <i data-lucide="trash-2" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+                `;
+        fileList.appendChild(el);
+      });
+
+      lucide.createIcons();
+    }
+
+    function removeFile(id) {
+      const fileToRemove = files.find(f => f.id === id);
+      if (fileToRemove) {
+        URL.revokeObjectURL(fileToRemove.preview);
+        if (fileToRemove.convertedUrl) URL.revokeObjectURL(fileToRemove.convertedUrl);
+      }
+      files = files.filter(f => f.id !== id);
+      renderFiles();
+    }
+
+    // Expose removeFile to global scope for onclick handler
+    window.removeFile = removeFile;
+
+    function clearAll() {
+      files.forEach(f => {
+        URL.revokeObjectURL(f.preview);
+        if (f.convertedUrl) URL.revokeObjectURL(f.convertedUrl);
+      });
+      files = [];
+      renderFiles();
+    }
+
+    async function processAll() {
+      if (isProcessing) return;
+      isProcessing = true;
+
+      // Update UI
+      processBtn.disabled = true;
+      processBtn.classList.add('bg-slate-400', 'cursor-not-allowed');
+      processBtn.classList.remove('bg-blue-600', 'hover:bg-blue-700');
+      processBtn.innerHTML = `<span class="animate-spin">⟳</span> Processing...`;
+
+      // Process files
+      for (let i = 0; i < files.length; i++) {
+        if (files[i].status === 'done') continue;
+
+        files[i].status = 'converting';
+        renderFiles(); // Update to show converting status
+
+        try {
+          const result = await convertImage(files[i]);
+          files[i].convertedUrl = result.url;
+          files[i].convertedSize = result.size;
+          files[i].status = 'done';
+        } catch (err) {
+          console.error(err);
+          files[i].status = 'error';
+        }
+        // Don't re-render every single file completion to avoid flickering if fast, 
+        // but for visual feedback let's do it.
+        renderFiles();
+      }
+
+      isProcessing = false;
+      processBtn.disabled = false;
+      processBtn.classList.remove('bg-slate-400', 'cursor-not-allowed');
+      processBtn.classList.add('bg-blue-600', 'hover:bg-blue-700');
+      processBtn.innerHTML = `Convert All <i data-lucide="arrow-right" class="w-4 h-4"></i>`;
+      lucide.createIcons();
+    }
+
+    function convertImage(fileObj) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.width;
+          canvas.height = img.height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0);
+
+          // Convert to WebP
+          const dataUrl = canvas.toDataURL('image/webp', quality);
+
+          // Calculate size savings
+          const head = 'data:image/webp;base64,';
+          const size = Math.round((dataUrl.length - head.length) * 3 / 4);
+
+          resolve({ url: dataUrl, size });
+        };
+        img.onerror = reject;
+        img.src = fileObj.preview;
+      });
+    }
+
+    async function downloadAllZip() {
+      const convertedFiles = files.filter(f => f.status === 'done');
+      if (convertedFiles.length === 0) return;
+
+      if (isZipping) return;
+      isZipping = true;
+
+      // Update Button UI
+      const originalBtnContent = downloadZipBtn.innerHTML;
+      downloadZipBtn.innerHTML = `<span class="animate-spin">⟳</span> <span class="hidden sm:inline">Zipping...</span>`;
+
+      try {
+        const zip = new JSZip();
+        const usedNames = new Set();
+
+        convertedFiles.forEach(file => {
+          if (!file.convertedUrl) return;
+
+          // Handle duplicate filenames
+          let baseName = file.file.name.substring(0, file.file.name.lastIndexOf('.')) || file.file.name;
+          let fileName = `${baseName}.webp`;
+          let counter = 1;
+
+          while (usedNames.has(fileName)) {
+            fileName = `${baseName} (${counter}).webp`;
+            counter++;
+          }
+          usedNames.add(fileName);
+
+          // Get base64 data (remove header)
+          const data = file.convertedUrl.split(',')[1];
+          zip.file(fileName, data, { base64: true });
+        });
+
+        const blob = await zip.generateAsync({ type: 'blob' });
+
+        // Trigger download
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'converted_images_geneus.zip';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+      } catch (error) {
+        console.error("Failed to zip", error);
+        alert("Failed to create zip file");
+      } finally {
+        isZipping = false;
+        downloadZipBtn.innerHTML = originalBtnContent;
+        lucide.createIcons();
+      }
+    }
+
+    function formatBytes(bytes, decimals = 2) {
+      if (bytes === 0) return '0 Bytes';
+      const k = 1024;
+      const dm = decimals < 0 ? 0 : decimals;
+      const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+    }
+  </script>
+</body>
+
+</html>
