@@ -1,0 +1,345 @@
+import React, { useState, useRef, useEffect } from 'react';
+import { Upload, FileImage, ArrowRight, Download, Trash2, Settings, AlertCircle, CheckCircle, Image as ImageIcon, X,
+Archive } from 'lucide-react';
+
+const App = () => {
+const [files, setFiles] = useState([]);
+const [quality, setQuality] = useState(0.8);
+const [isDragging, setIsDragging] = useState(false);
+const [isProcessing, setIsProcessing] = useState(false);
+const [isZipping, setIsZipping] = useState(false);
+
+// Load JSZip dynamically
+useEffect(() => {
+if (!window.JSZip) {
+const script = document.createElement('script');
+script.src = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
+script.async = true;
+document.body.appendChild(script);
+return () => {
+if (document.body.contains(script)) {
+document.body.removeChild(script);
+}
+};
+}
+}, []);
+
+// Constants
+const MAX_FILES = 50;
+
+const onDragOver = (e) => {
+e.preventDefault();
+setIsDragging(true);
+};
+
+const onDragLeave = (e) => {
+e.preventDefault();
+setIsDragging(false);
+};
+
+const onDrop = (e) => {
+e.preventDefault();
+setIsDragging(false);
+const droppedFiles = Array.from(e.dataTransfer.files);
+handleFiles(droppedFiles);
+};
+
+const handleFileInput = (e) => {
+const selectedFiles = Array.from(e.target.files);
+handleFiles(selectedFiles);
+};
+
+const handleFiles = (newFiles) => {
+const validFiles = newFiles.filter(file =>
+file.type === 'image/png' || file.type === 'image/jpeg' || file.type === 'image/jpg'
+);
+
+if (validFiles.length === 0) return;
+
+const newFileObjects = validFiles.map(file => ({
+id: Math.random().toString(36).substr(2, 9),
+file,
+preview: URL.createObjectURL(file),
+convertedUrl: null,
+status: 'pending', // pending, converting, done, error
+convertedSize: 0,
+originalSize: file.size
+}));
+
+setFiles(prev => [...prev, ...newFileObjects].slice(0, MAX_FILES));
+};
+
+const convertImage = async (fileObj) => {
+return new Promise((resolve, reject) => {
+const img = new Image();
+img.onload = () => {
+const canvas = document.createElement('canvas');
+canvas.width = img.width;
+canvas.height = img.height;
+const ctx = canvas.getContext('2d');
+ctx.drawImage(img, 0, 0);
+
+// Convert to WebP
+const dataUrl = canvas.toDataURL('image/webp', quality);
+
+// Calculate size savings
+const head = 'data:image/webp;base64,';
+const size = Math.round((dataUrl.length - head.length) * 3 / 4);
+
+resolve({ url: dataUrl, size });
+};
+img.onerror = reject;
+img.src = fileObj.preview;
+});
+};
+
+const downloadAllZip = async () => {
+const convertedFiles = files.filter(f => f.status === 'done');
+if (convertedFiles.length === 0) return;
+
+if (!window.JSZip) {
+console.error("JSZip not loaded yet");
+return;
+}
+
+setIsZipping(true);
+try {
+const zip = new window.JSZip();
+const usedNames = new Set();
+
+convertedFiles.forEach(file => {
+if (!file.convertedUrl) return;
+
+// Handle duplicate filenames
+let baseName = file.file.name.substring(0, file.file.name.lastIndexOf('.')) || file.file.name;
+let fileName = `${baseName}.webp`;
+let counter = 1;
+
+while (usedNames.has(fileName)) {
+fileName = `${baseName} (${counter}).webp`;
+counter++;
+}
+usedNames.add(fileName);
+
+// Get base64 data (remove header)
+const data = file.convertedUrl.split(',')[1];
+zip.file(fileName, data, { base64: true });
+});
+
+const blob = await zip.generateAsync({ type: 'blob' });
+
+// Trigger download without extra dependencies
+const url = URL.createObjectURL(blob);
+const a = document.createElement('a');
+a.href = url;
+a.download = 'converted_images_geneus.zip';
+document.body.appendChild(a);
+a.click();
+document.body.removeChild(a);
+URL.revokeObjectURL(url);
+
+} catch (error) {
+console.error("Failed to zip", error);
+} finally {
+setIsZipping(false);
+}
+};
+
+const processAll = async () => {
+setIsProcessing(true);
+
+const processedFiles = await Promise.all(files.map(async (fileObj) => {
+if (fileObj.status === 'done') return fileObj;
+
+try {
+const result = await convertImage(fileObj);
+return {
+...fileObj,
+convertedUrl: result.url,
+convertedSize: result.size,
+status: 'done'
+};
+} catch (err) {
+return { ...fileObj, status: 'error' };
+}
+}));
+
+setFiles(processedFiles);
+setIsProcessing(false);
+};
+
+const removeFile = (id) => {
+setFiles(prev => {
+const newFiles = prev.filter(f => f.id !== id);
+// Cleanup object URLs to prevent memory leaks
+const fileToRemove = prev.find(f => f.id === id);
+if (fileToRemove) {
+URL.revokeObjectURL(fileToRemove.preview);
+}
+return newFiles;
+});
+};
+
+const clearAll = () => {
+files.forEach(f => URL.revokeObjectURL(f.preview));
+setFiles([]);
+};
+
+const formatBytes = (bytes, decimals = 2) => {
+if (bytes === 0) return '0 Bytes';
+const k = 1024;
+const dm = decimals < 0 ? 0 : decimals; const sizes=['Bytes', 'KB' , 'MB' , 'GB' ]; const i=Math.floor(Math.log(bytes) /
+  Math.log(k)); return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i]; }; // Effect to auto-convert
+  when added (optional, currently manual to allow quality setting) // Keeping it manual allows user to check settings
+  first. return ( <div className="min-h-screen bg-slate-50 text-slate-800 font-sans p-4 md:p-8">
+  <div className="max-w-5xl mx-auto space-y-6">
+
+    {/* Header */}
+    <div
+      className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+      <div>
+        <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
+          <ImageIcon className="w-8 h-8 text-blue-600" />
+          WebP Converter
+        </h1>
+        <p className="text-slate-500 text-sm mt-1">Secure client-side conversion for PNG & JPEG</p>
+      </div>
+      <div className="flex items-center gap-4 bg-slate-50 p-3 rounded-xl border border-slate-200">
+        <Settings className="w-4 h-4 text-slate-400" />
+        <div className="flex flex-col">
+          <label className="text-xs font-medium text-slate-600 mb-1">Quality: {Math.round(quality * 100)}%</label>
+          <input type="range" min="0.1" max="1" step="0.05" value={quality} onChange={(e)=>
+          setQuality(parseFloat(e.target.value))}
+          className="w-32 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+          />
+        </div>
+      </div>
+    </div>
+
+    {/* Dropzone */}
+    <div onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop} className={` relative group cursor-pointer
+      transition-all duration-200 ease-in-out border-2 border-dashed rounded-2xl p-12 text-center ${isDragging
+      ? 'border-blue-500 bg-blue-50/50' : 'border-slate-300 hover:border-slate-400 bg-white' } `}>
+      <input type="file" multiple accept="image/png, image/jpeg, image/jpg" onChange={handleFileInput}
+        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+      <div className="flex flex-col items-center gap-4 pointer-events-none">
+        <div className={`p-4 rounded-full ${isDragging ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-400'
+          }`}>
+          <Upload className="w-8 h-8" />
+        </div>
+        <div className="space-y-1">
+          <p className="text-lg font-medium text-slate-700">
+            {isDragging ? 'Drop images here' : 'Click or drag images here'}
+          </p>
+          <p className="text-sm text-slate-400">Supports PNG and JPEG (Max 50 files)</p>
+        </div>
+      </div>
+    </div>
+
+    {/* Actions Bar */}
+    {files.length > 0 && (
+    <div
+      className="flex items-center justify-between bg-white p-4 rounded-xl border border-slate-200 shadow-sm sticky top-4 z-10">
+      <div className="text-sm text-slate-600 font-medium">
+        {files.length} file{files.length !== 1 && 's'} loaded
+      </div>
+      <div className="flex items-center gap-3">
+        <button onClick={clearAll}
+          className="px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+          Clear All
+        </button>
+
+        {files.some(f => f.status === 'done') && (
+        <button onClick={downloadAllZip} disabled={isZipping}
+          className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg shadow-sm transition-colors">
+          {isZipping ? <span className="animate-spin">⟳</span> :
+          <Archive className="w-4 h-4" />}
+          <span className="hidden sm:inline">Download Zip</span>
+        </button>
+        )}
+
+        <button onClick={processAll} disabled={isProcessing} className={` flex items-center gap-2 px-6 py-2 text-sm
+          font-medium text-white rounded-lg shadow-sm transition-all transform active:scale-95 ${isProcessing
+          ? 'bg-slate-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700' } `}>
+          {isProcessing ? (
+          <>
+            <span className="animate-spin">⟳</span> Processing...
+          </>
+          ) : (
+          <>
+            Convert All
+            <ArrowRight className="w-4 h-4" />
+          </>
+          )}
+        </button>
+      </div>
+    </div>
+    )}
+
+    {/* File List */}
+    <div className="space-y-3">
+      {files.map((fileObj) => (
+      <div key={fileObj.id}
+        className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center gap-4 transition-all hover:border-blue-200">
+        {/* Preview */}
+        <div className="relative w-20 h-20 bg-slate-100 rounded-lg overflow-hidden shrink-0 border border-slate-200">
+          <img src={fileObj.preview} alt="Preview" className="w-full h-full object-cover" />
+        </div>
+
+        {/* Info */}
+        <div className="flex-1 min-w-0">
+          <h3 className="font-medium text-slate-800 truncate">{fileObj.file.name}</h3>
+          <div className="flex items-center gap-4 mt-1 text-sm">
+            <span className="text-slate-500">{formatBytes(fileObj.originalSize)}</span>
+            <ArrowRight className="w-3 h-3 text-slate-300" />
+            <span className={`font-medium ${fileObj.convertedSize < fileObj.originalSize ? 'text-green-600'
+              : 'text-slate-600' }`}>
+              {fileObj.convertedSize > 0 ? formatBytes(fileObj.convertedSize) : '---'}
+            </span>
+            {fileObj.convertedSize > 0 && (
+            <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
+              -{Math.round((1 - fileObj.convertedSize / fileObj.originalSize) * 100)}%
+            </span>
+            )}
+          </div>
+        </div>
+
+        {/* Status & Actions */}
+        <div className="flex items-center gap-3 justify-end shrink-0">
+          {fileObj.status === 'pending' && (
+          <span className="text-xs font-medium text-slate-400 bg-slate-100 px-3 py-1 rounded-full">Pending</span>
+          )}
+
+          {fileObj.status === 'done' && (
+          <a href={fileObj.convertedUrl} download={`${fileObj.file.name.split('.')[0]}.webp`}
+            className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-slate-800 transition-colors">
+            <Download className="w-4 h-4" />
+            <span className="hidden sm:inline">Download</span>
+          </a>
+          )}
+
+          <button onClick={()=> removeFile(fileObj.id)}
+            className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+            >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+      ))}
+
+      {files.length === 0 && !isDragging && (
+      <div className="text-center py-12">
+        <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
+          <FileImage className="w-8 h-8 text-slate-300" />
+        </div>
+        <p className="text-slate-400">No files selected yet</p>
+      </div>
+      )}
+    </div>
+
+  </div>
+  </div>
+  );
+  };
+
+  export default App;
